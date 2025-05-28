@@ -5,3 +5,6 @@ langgraph
 langgraph_supervisor
 tavily-python
 dotenv
+bs4
+faiss-cpu
+pypdf
