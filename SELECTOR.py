@@ -97,15 +97,13 @@ def compute_score(stats: Dict[str, Dict[str, Union[int, float]]], role: str) -> 
 
 
 def overall_score(player_stats_dict: Dict[str, Union[str, List[Dict[str, Any]]]]) -> float: # will do for single player
-    """"""
+    """This function just compute the overall score"""
     role = player_stats_dict["role"].lower()
 
     weight = {
-        "recent": 0.3,
-        "vs_opp": 0.15,
-        "at_venue": 0.15,
-        "head_2_head": 0.25,
-        "pitch": 0.15
+        "recent": 0.5,
+        "vs_opp": 0.25,
+        "at_venue": 0.25
     }
 
     recent_dict = (player_stats_dict["stats"][0])["data"]
@@ -116,27 +114,58 @@ def overall_score(player_stats_dict: Dict[str, Union[str, List[Dict[str, Any]]]]
     vs_opp_score = compute_score(vs_opp_dict, role)
     at_venue_score = compute_score(at_venue_dict, role)
 
-    head_2_head_score = 0
-    head_2_head_list = player_stats_dict["head_2_head_stats"]
-    for dict in head_2_head_list:
-        head_2_head_score += dict["advantage_score"]
-    
-    head_2_head_score  = head_2_head_score / len(head_2_head_list)
-
-    pitch_score  = player_stats_dict["pitch_stats"]
-
     return (
         weight["recent"] * recent_score + 
         weight["vs_opp"] * vs_opp_score + 
-        weight["at_venue"] * at_venue_score + 
-        weight["head_2_head"] * head_2_head_score +
-        weight["pitch"] * pitch_score
+        weight["at_venue"] * at_venue_score
     )
 
 @tool
 def select_players(players_overall_details: 
     List[Dict[str, Union[str, List[Dict[str, Any]]]]]) -> Tuple[List[Dict[str, Union[str, List[Dict[str, Any]]]]], List[Dict[str, Any]]]:
-    """xxsadvf"""
+    """
+    Compute and append an overall_score for each player, then return two lists:
+    
+    1. The original list of player dictionaries, each augmented with an "overall_score" key.
+       - Input format for each player dict:
+         {
+           "name": str,
+           "role": str,  # "batsman", "bowler", "batting allrounder", or "bowling allrounder"
+           "is_wicketkeeper": "True"/"False",
+           "is_overseas": "True"/"False",
+           "batting_style": str,
+           "bowling_style": str,
+           "stats": [
+             {"title": "last_8_innings_stats",        "data": { … }},
+             {"title": "career_stats_vs_<Opposition>", "data": { … }},
+             {"title": "career_stats_at_<Venue>",      "data": { … }}
+           ]
+         }
+
+    2. A secondary list of simplified dictionaries for selection overview:
+       [
+         {
+           "name": str,
+           "role": str,
+           "overall_score": float
+         },
+         ...
+       ]
+
+    Steps:
+    - For each player in players_overall_details:
+      1. Extract their "role" and their three "data" dictionaries under "stats".
+      2. Call `overall_score(player)` (which computes scores based on recent form, vs opposition, at venue).
+      3. Add the returned float under player["overall_score"].
+      4. Append { "name", "role", "overall_score" } to the secondary list.
+
+    Returns:
+    ----------
+    Tuple[
+      List[dict],  # The input list, but now each dict has "overall_score"
+      List[dict]   # Simplified list of { "name", "role", "overall_score" }
+    ]
+    """
 
     result = []
     for player in players_overall_details:
@@ -154,6 +183,295 @@ player_selector = create_react_agent(
     name = "selector",
     tools = [select_players],
     prompt = (
-        "You are an agent which is phenomenal at maths. Answer the query of the user to the best you can."
+        """
+    You are “Selector”, a specialized agent whose job is to build an ideal fantasy XI by ranking and selecting players based on their computed overall_score. You have one tool available:
+
+    • select_players(players_overall_details)
+    - Input: a list of player dictionaries, each containing:
+        • name (string)
+        • role (string: "batsman", "bowler", "batting allrounder", or "bowling allrounder")
+        • is_wicketkeeper (True/False)
+        • is_overseas (True/False)
+        • batting_style, bowling_style
+        • stats: a list of three dicts:
+            1. last_8_innings_stats → “data” of recent form
+            2. career_stats_vs_<Opposition> → “data” vs opposition
+            3. career_stats_at_<Venue> → “data” at that venue
+    - Output: 
+        1. The same list augmented with “overall_score” for each player.
+        2. A simplified list of dicts: { "name", "role", "overall_score" }.
+
+    Your task:
+    1. Call the tool `select_players` with the full list of player stats. 
+    2. Receive back each player’s `overall_score`. 
+    3. Then, consider standard team‐building constraints (you may search the web if needed):
+    - Exactly 11 players.
+    - A minimum of 5 batsmen (including at least one wicketkeeper).
+    - A minimum of 4 bowlers.
+    - At least 1 and at most 2 all‐rounders.
+    - At most 4 overseas players.
+    - Remaining spots filled by best‐scoring players by role.
+
+    4. Rank players by `overall_score` within each role category (batsman, bowler, all‐rounder).
+    5. Select players in a balanced way to satisfy the constraints:
+    • Pick top wicketkeeper‐batsman by score (counts toward “batsman” and “wk”).
+    • Then fill remaining batting slots from highest‐scoring non‐keeper batsmen.
+    • Pick all‐rounders (1–2) by descending score.
+    • Fill four bowler slots from top bowlers.
+    • Ensure overseas count ≤ 4; if excess, drop lowest‐scoring overseas until constraint met.
+    6. For each selected player, provide a rationale:
+    • Their overall_score.
+    • Role and category ranking (e.g. “3rd highest among batsmen”).
+    • Any special note (e.g. “Only overseas seamer with top‐4 score”).
+
+    7. As output, return a JSON object with:
+    {
+        "selected_players": [
+        {
+            "name": "...", 
+            "role": "...", 
+            "overall_score": ..., 
+            "rationale": "..."
+        },
+        …
+        ],
+        "reasoning": "Concise summary of how team was constructed"
+    }
+
+    If asked to compare two players, simply compute both of their overall_score values and explain which has the higher score and why, referencing recent form, venue, and opposition breakdown.
+
+    Be concise, clear, and always justify selections by citing scores and role‐specific constraints. Use websearch only if you need to confirm official team composition rules (for example, verifying “max 4 overseas” in this league).  
+
+            """
+        )
     )
-)
+
+print(select_players.invoke({"players_overall_details": [
+    {
+      "name": "Virat Kohli",
+      "role": "batsman",
+      "is_wk": "False",
+      "is_overseas": "False",
+      "batting_style": "Right Handed Bat",
+      "bowling_style": "Right-arm medium",
+      "stats": [
+        {
+          "title": "last_8_innings_stats",
+          "data": {
+            "Batting": {
+              "Matches": 8,
+              "Innings": 8,
+              "Runs": 366,
+              "Balls": 246,
+              "Outs": 7,
+              "4s": 43,
+              "6s": 9,
+              "50s": 5,
+              "100s": 0,
+              "SR": 148.78,
+              "Avg": 52.29
+            }
+          }
+        },
+        {
+          "title": "career_stats_vs_Punjab_Kings",
+          "data": {
+            "Batting": {
+              "Matches": 35,
+              "Innings": 35,
+              "Runs": 1116,
+              "Balls": 839,
+              "Outs": 31,
+              "4s": 117,
+              "6s": 33,
+              "50s": 6,
+              "100s": 1,
+              "SR": 133.01,
+              "Avg": 36.0
+            }
+          }
+        },
+        {
+          "title": "career_stats_at_M_Chinnaswamy_Stadium",
+          "data": {
+            "Batting": {
+              "Matches": 109,
+              "Innings": 106,
+              "Runs": 3618,
+              "Balls": 2514,
+              "Outs": 92,
+              "4s": 329,
+              "6s": 154,
+              "50s": 27,
+              "100s": 4,
+              "SR": 143.91,
+              "Avg": 39.32
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Shreyas Iyer",
+      "role": "batsman",
+      "is_wk": "False",
+      "is_overseas": "False",
+      "batting_style": "Right Handed Bat",
+      "bowling_style": "Right-arm legbreak",
+      "stats": [
+        {
+          "title": "last_8_innings_stats",
+          "data": {
+            "Batting": {
+              "Matches": 8,
+              "Innings": 8,
+              "Runs": 340,
+              "Balls": 201,
+              "Outs": 5,
+              "4s": 26,
+              "6s": 19,
+              "50s": 3,
+              "100s": 0,
+              "SR": 169.15,
+              "Avg": 68.0
+            }
+          }
+        },
+        {
+          "title": "career_stats_vs_Royal_Challengers_Bengaluru",
+          "data": {
+            "Batting": {
+              "Matches": 17,
+              "Innings": 17,
+              "Runs": 408,
+              "Balls": 339,
+              "Outs": 16,
+              "4s": 34,
+              "6s": 13,
+              "50s": 4,
+              "100s": 0,
+              "SR": 120.35,
+              "Avg": 25.5
+            }
+          }
+        },
+        {
+          "title": "career_stats_at_M_Chinnaswamy_Stadium",
+          "data": {
+            "Batting": {
+              "Matches": 11,
+              "Innings": 11,
+              "Runs": 305,
+              "Balls": 222,
+              "Outs": 9,
+              "4s": 26,
+              "6s": 14,
+              "50s": 3,
+              "100s": 0,
+              "SR": 137.38,
+              "Avg": 33.88
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Hardik Pandya",
+      "role": "batting allrounder",
+      "is_wk": "False",
+      "is_overseas": "False",
+      "batting_style": "Right Handed Bat",
+      "bowling_style": "Right-arm fast-medium",
+      "stats": [
+        {
+          "title": "last_8_innings_stats",
+          "data": {
+            "Batting": {
+              "Matches": 8,
+              "Innings": 7,
+              "Runs": 120,
+              "Balls": 76,
+              "Outs": 5,
+              "4s": 9,
+              "6s": 6,
+              "50s": 0,
+              "100s": 0,
+              "SR": 157.89,
+              "Avg": 24.0
+            },
+            "Bowling": {
+              "Matches": 8,
+              "Innings": 7,
+              "Overs": 13.0,
+              "Maidens": 0,
+              "Runs": 146,
+              "Wkts": 3,
+              "Eco": 11.23,
+              "Avg": 48.67,
+              "SR": 26.0
+            }
+          }
+        },
+        {
+          "title": "career_stats_vs_Royal_Challengers_Bengaluru",
+          "data": {
+            "Batting": {
+              "Matches": 18,
+              "Innings": 17,
+              "Runs": 361,
+              "Balls": 220,
+              "Outs": 8,
+              "4s": 22,
+              "6s": 26,
+              "50s": 2,
+              "100s": 0,
+              "SR": 164.09,
+              "Avg": 45.12
+            },
+            "Bowling": {
+              "Matches": 18,
+              "innings": 12,
+              "Overs": 29.0,
+              "Maidens": 0,
+              "Runs": 303,
+              "Wkts": 7,
+              "Eco": 10.44,
+              "Avg": 43.28,
+              "SR": 24.86
+            }
+          }
+        },
+        {
+          "title": "career_stats_at_M_Chinnaswamy_Stadium",
+          "data": {
+            "Batting": {
+              "Matches": 12,
+              "Innings": 9,
+              "Runs": 162,
+              "Balls": 112,
+              "Outs": 6,
+              "4s": 12,
+              "6s": 9,
+              "50s": 1,
+              "100s": 0,
+              "SR": 144.64,
+              "Avg": 27.0
+            },
+            "Bowling": {
+              "Matches": 12,
+              "innings": 10,
+              "Overs": 27.0,
+              "Maidens": 0,
+              "Runs": 240,
+              "Wkts": 11,
+              "Eco": 8.88,
+              "Avg": 21.81,
+              "SR": 14.73
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
+))

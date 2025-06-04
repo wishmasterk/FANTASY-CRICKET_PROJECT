@@ -18,8 +18,7 @@ import os
 load_dotenv()
 LLM = ChatOpenAI(model = "gpt-4.1")
 
-def fetch_response(url: str) -> dict:
-    headers={"User-Agent": "Mozilla/5.0"}
+def fetch_response(url: str, headers: Dict) -> dict:
     response = requests.get(url, headers=headers)
     if response.status_code != 200:
        return {}
@@ -487,6 +486,71 @@ def combine_recent_stats(player_name: str, player_role: str, overall_stats: dict
 
     return result
 
+# TOOLS -> DATA COLLECTOR AGENT
+@tool
+def player_details(player_names: List[str]) -> List[dict]:
+    """This tool returns the player ID and name for a list of player names.
+        It takes a list containing names of players as input and output a list 
+        of dict with each dict containing the player id and name of that player."""
+    
+    id_headers = {
+        'x-apihub-key': '9HN92wz6l7bberNNuKkhDCXeb4YH4lXo2fIKuVdgCpB82jpHlM',
+        'x-apihub-host': 'Cricbuzz-Official-Cricket-API.allthingsdev.co',
+        'x-apihub-endpoint': 'b0242771-45ea-4c07-be42-a6da38cdec41'
+    }
+
+    results = []
+
+    for name in player_names:
+        id_url = f"https://Cricbuzz-Official-Cricket-API.proxy-production.allthingsdev.co/browse/player?search={name.replace(' ', '+')}"
+        data = fetch_response(id_url, id_headers)
+        players = data.get("player", [])
+        if not players:
+            results.append({"player name": name, "error": "No player found"})
+            continue
+
+        player_id = players[0].get("id")
+        player_name = players[0].get("name")
+        is_overseas = True
+        if players[0].get("teamName") == "India":
+            is_overseas = False
+
+        if not player_id:
+            results.append({"player name": name, "error": "Player ID not found"})
+            continue
+
+        role_url = f"https://Cricbuzz-Official-Cricket-API.proxy-production.allthingsdev.co/browse/player/{player_id}"
+        role_headers = {
+            'x-apihub-key': '9HN92wz6l7bberNNuKkhDCXeb4YH4lXo2fIKuVdgCpB82jpHlM',
+            'x-apihub-host': 'Cricbuzz-Official-Cricket-API.allthingsdev.co',
+            'x-apihub-endpoint': 'a055bf38-0796-4fab-8fe3-6f042f04cdba'
+        }
+        info = fetch_response(role_url, role_headers)
+        player_role = info.get("role", "Unknown").lower()
+        
+        is_wicketkeeper = "wk" in player_role
+
+        batting_style = None
+        bowling_style = None
+        if "batsman" in player_role:
+            batting_style = info.get("bat", "Unknown")
+        elif "bowler" in player_role:
+            bowling_style = info.get("bowl", "Unknown")
+        else:
+            batting_style = info.get("bat", "Unknown")
+            bowling_style = info.get("bowl", "Unknown")
+
+        results.append({
+            "name": player_name,
+            "role": player_role,
+            "is_wicketkeeper": is_wicketkeeper,
+            "is_overseas": is_overseas,
+            "batting_style": batting_style,
+            "bowling_style": bowling_style
+        })
+
+    return results
+
 
 @tool
 def player_stats(player_details: List[Dict[str, str]], venue_name: str) -> Dict[str, Any]:
@@ -612,7 +676,7 @@ def player_stats(player_details: List[Dict[str, str]], venue_name: str) -> Dict[
     return combine_recent_stats(name, role, overall_stats_dict, opp_stats_dict, venue_stats_dict, opposition, venue_name, is_wk, is_overseas, batting_style, bowling_style)
 
 
-# 2. Data Collector Agent: 
+# Data Collector Agent: 
 data_collector_agent = create_react_agent(
     model = LLM,
     name = "data_miner",
@@ -622,4 +686,4 @@ data_collector_agent = create_react_agent(
     )
 )
 
-print(player_stats.invoke({"player_details": [{"name": "Ravindra jadeja", "role": "bowlingallrounder", "is_wicketkeeper": "False", "is_overseas": "False", "batting_style": "Right-hand-Batsman", "bowling_style": "Right-arm-Medium", "opposition": "Mumbai indians"}], "venue_name": "chepauk"}))
+print(player_details.invoke({"player_names": ["virat kohli"]}))
