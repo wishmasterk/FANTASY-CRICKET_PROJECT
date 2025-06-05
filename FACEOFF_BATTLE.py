@@ -1,3 +1,4 @@
+# cricmetric website scraped using scrape.do API
 from langchain_openai import ChatOpenAI
 from langgraph_supervisor import create_supervisor
 from langgraph.prebuilt import create_react_agent
@@ -20,7 +21,7 @@ import re
 import os
 
 
-def _name_variants(full_name: str) -> list:
+def name_variants(full_name: str) -> list:
     """
     Generate possible abbreviated variants for a multi-word name.
     - If two words (First Last): ["First Last", "F Last"]
@@ -41,9 +42,7 @@ def _name_variants(full_name: str) -> list:
     return variants
 
 
-def fetch_cricmetric_table_via_scrapedo(
-    batsman: str, bowler: str
-) -> str:
+def fetch_table(batsman: str, bowler: str) -> str:
     """
     1. Tries full `batsman` vs `bowler` name pair on CricMetric via Scrape.do.
     2. If no <table> found, tries abbreviated variants (e.g., "F Last", "AB C").
@@ -90,9 +89,9 @@ def fetch_cricmetric_table_via_scrapedo(
     if table_html:
         return table_html
 
-    # No table for full names: generate and try variants
-    bats_variants = _name_variants(batsman)
-    bowl_variants = _name_variants(bowler)
+    # For some cicketers there are shrt forms on the website, like (A Mhatre) in place of Ayush Mhatre so creating diff variants and checking
+    bats_variants = name_variants(batsman)
+    bowl_variants = name_variants(bowler)
 
     for bv in bats_variants:
         for ov in bowl_variants:
@@ -106,7 +105,7 @@ def fetch_cricmetric_table_via_scrapedo(
     return ""
 
 
-def parse_cricmetric_total_row(table_html: str, batsman: str, bowler: str) -> Dict[str, str]:
+def parse_table(table_html: str, batsman: str, bowler: str) -> Dict[str, str]:
     """
     Given HTML containing one or more <table class="table"> blocks (already
     filtered to only T20I/TWENTY20 by fetch_cricmetric_table_via_scrapedo), this:
@@ -116,9 +115,7 @@ def parse_cricmetric_total_row(table_html: str, batsman: str, bowler: str) -> Di
          and aggregates them column‐wise.
       4) Computes combined Strike Rate and Average from aggregated Runs, Balls, Outs.
       5) Returns a dict:
-         {
-           "Title": "Batsman V/S Bowler",
-           "Stats": {
+            {
              "Innings": "<total_innings>",
              "Runs": "<sum_of_runs>",
              "Balls": "<sum_of_balls>",
@@ -129,10 +126,7 @@ def parse_cricmetric_total_row(table_html: str, batsman: str, bowler: str) -> Di
              "SR": "<computed_SR>",
              "Avg": "<computed_Avg>"
            }
-         }
     """
-    result: Dict[str, Any] = {}
-    result["Title"] = f"{batsman} V/S {bowler}"
     stats: Dict[str, str] = {}
 
     soup = BeautifulSoup(table_html, "html.parser")
@@ -204,13 +198,10 @@ def parse_cricmetric_total_row(table_html: str, batsman: str, bowler: str) -> Di
     stats["SR"] = f"{combined_sr:.1f}"
     stats["Avg"] = f"{combined_avg:.1f}"
 
-    result["Stats"] = stats
-    return result
+    return stats
 
 
-def players_faceoff(
-    batsman: str, bowler: str
-) -> Dict[str, str]:
+def players_faceoff(batsman: str, bowler: str) -> Dict[str, str]:
     """
     High-level helper that:
       1) Calls `fetch_cricmetric_table_via_scrapedo(...)` to retrieve the <table> HTML.
@@ -218,7 +209,7 @@ def players_faceoff(
       3) Otherwise calls `parse_cricmetric_total_row(...)` to extract the “Total” row + match count.
       4) Returns the combined dict.
     """
-    table_html = fetch_cricmetric_table_via_scrapedo(batsman, bowler)
+    table_html = fetch_table(batsman, bowler)
     if not table_html:
         return {}
-    return parse_cricmetric_total_row(table_html, batsman, bowler)
+    return parse_table(table_html, batsman, bowler)
