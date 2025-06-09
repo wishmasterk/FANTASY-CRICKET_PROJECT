@@ -1,41 +1,30 @@
-from langchain_openai import ChatOpenAI
-from langgraph_supervisor import create_supervisor
-from langgraph.prebuilt import create_react_agent
 from langchain_community.tools.tavily_search.tool import TavilySearchResults
+from langchain_community.tools import DuckDuckGoSearchRun
+from langchain_openai import ChatOpenAI
+from langgraph.prebuilt import create_react_agent
 from langchain.tools import tool
-from collections import defaultdict
 from dotenv import load_dotenv
-from typing import List, Dict, Optional, Union, Any, tuple
-from langchain_openai import OpenAIEmbeddings
-from langchain_community.document_loaders import PyPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import FAISS
-from bs4 import BeautifulSoup
-from langchain.tools import DuckDuckGoSearchRun
-import difflib
-import time
+from typing import List, Dict, Any
 import requests
-import urllib.parse
 import re
-import os
 
 load_dotenv()
 LLM = ChatOpenAI(model = "gpt-4.1")
 
 # search tools -> will be used to search the web at times
-tavily_search = TavilySearchResults() 
+tavily_search = TavilySearchResults(max_results = 5) # return top 5 searches -> default, can be altered
 duck_search = DuckDuckGoSearchRun() 
 
 # TOOLS
 @tool
 def match_info() -> List[Dict[str, Any]]:
     """
-    Fetch a list of upcoming IPL matches and their basic details.
+    Fetch a list of upcoming cricket T20 matches and their basic details.
 
     Steps:
     1. Query the Cricbuzz Upcoming Matches API for all upcoming matches.
-    2. Filter to include only matches from the “Indian Premier League” series.
-    3. For each IPL match, extract:
+    2. Filter to include only matches from the “{user demanded}” series. -> IPL (default)
+    3. For each match, extract:
        - Match ID
        - Match Description (e.g., "Qualifier 1")
        - Teams (formatted as "Team A vs Team B")
@@ -153,25 +142,55 @@ def additional_info(match_id: str) -> str:
 
     return cleaned
 
-
 # Researcher Agent: gathers match details (teams, venue, pitch, injuries, probable XI)
 research_agent = create_react_agent(
-    model=LLM,
-    name="researcher",
-    tools=[match_info, additional_info, tavily_search, duck_search],
-    prompt="""
-You are a cricket expert assistant. When asked about an upcoming IPL match:
+    model = LLM,
+    name = "research_agent",
+    tools = [match_info, additional_info, tavily_search, duck_search],
+    prompt = """
+    -You are a cricket research expert. 
+    -Your job is to fetch out the details of the upcoming matches based on the user query.
+    -You have access to a number of tools to carry out the research, and every tool does specific part of the work.
+    **TOOLS:
+    -> match_info: It will list down some of the upcoming matches in the recent time, and it will returns a dict containing
+    some specific details about that match and that too for every match. Hence returns a list of dict.
+    One of the key returned by this tool is "match_id" and it is a critical information as it will be used to get the information
+    from the additional_info tool.
+    -> additional_info: It takes single "match_id" as input in string format and also returns a string containing the information about the 
+    pitch report, weather conditions, probable playing XI's, injury/availability updates and some other additional info.
+    Now from the received text, you have to extract these fields, and you have to output them in a structured format:
+    - Teams: {Teams}
+    - Venue: {Venue}
+    - Match Status: {Match_Status}
+    - Pitch Report: {Pitch_report}
+    - Probable Playing XIs for both teams: {Playing_XI_both_teams}
+    - Current Injuries or Player Availability Notes: {Injury_news}
+    - Other important info: {add_info} -> optional
+    **Note - It can happen that the string returned by this tool might not contain some of the details, which you have to return so, 
+    for this you have the access to tavily_search and duck_search tool to search the web and get that inforamtion.
+    - It can still happen that after doing the web_search as well, you do not got that specific details, 
+    so in these cases just tell the user that this information is not available as of now, don't make up by yourself.
+    **Note - During the extraction of the required fields from the text, there are hogh chances that the str does not contain information
+    regarding the probable eleven players of the teams, instead it contains the squads of both the teams, so in this case you can search the web
+    to either get this detail or search for the previous match of these teams individually and get the teams from there, if possible.
+    But of it you don't get it, so just return the squads form both the teams and please mention that the probable XI's aren't available.
+    Basically, tell the user whatever the case is. 
+    **Note - The first thing after getting that text from additional_info, if it contains playing XIs or squads of the team first use tavily_search tool
+    to find what is the name of the team to which the XI/squad belongs as the text does not contain this.
+    
+    -Use tools based on the user query, if you feel that you have to use both the tools to meet the then use both, if you feel that the user
+    wants some specific details then choose on your own, but make sure to use the additional_info tool you have to first use the match_info
+    as it uses the match_id returned by this tool.
 
-1. Use the match_info tool to list all upcoming IPL matches, then identify the specific match (by ID) requested by the user.
-2. Use the additional_info tool with that match ID to retrieve commentary text containing pitch report, probable playing XI, injury updates, and venue records.
-3. If any detail is missing or unclear, use tavily_search or duck_search to locate supplementary information.
-4. Present all gathered details in a clear, structured format:
-   - Match ID, Teams, Venue, Match Status
-   - Pitch Report
-   - Probable Playing XIs for both teams
-   - Current Injuries or Player Availability Notes
-   - Any relevant venue history or records
+    -Please verify the information before you send it to the user, and make sure that the query is addressed.
+    If there is any discrepancy please do not share that information, only the ones which u are confident with it, just send that, 
+    **example - if you fetch playing XI from site and if some players names are there in both team, then there is some error for sure so just return the squads.
+    -Also cross-check the probable-playing XI's with their team names, it should not happen that you give playing XI of a team with other team name
+    and vice versa so make sure of that.
+    """
+    )
 
-Always verify correctness; if you cannot find a particular field (e.g. “pitch report”), state “Information not found” rather than guessing.
 """
-)
+result = research_agent.invoke({"role": "user", "content": "give me complete match details for upcoming match of Chhattisgarh Cricket Premier League 2025."})
+for mes in result["messages"]:
+    mes.pretty_print()"""

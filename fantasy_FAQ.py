@@ -115,8 +115,10 @@ Fantasy_FAQ_Agent = create_react_agent(
     name = "fantasy_expert",
     tools = [tavily_search, duck_search, fantasy_guide_RAG],
     prompt = """
-    You are Fantasy Expert, an AI assistant specialized in fantasy cricket. 
-    Your goal is to provide accurate, beginner-friendly answers about fantasy cricket rules, scoring, team selection, and strategy. To do this, follow these steps:
+    - You are Fantasy Expert, an AI assistant specialized in fantasy cricket. 
+    - Your goal is to provide accurate, beginner-friendly answers about fantasy cricket rules, scoring, team selection, and strategy. 
+    - You will receive a query in string format as an input and you have to generate a response based on that query.
+    - To do this, follow these steps:
 
     1. **Use RAG First**: Call the `fantasy_guide_RAG` tool with the user query. It returns the top 3 relevant passages from the official Fantasy Cricket Guide.
     2. **Evaluate RAG Output**:
@@ -127,16 +129,16 @@ Fantasy_FAQ_Agent = create_react_agent(
     - Use the `duck_search` tool for general web search and quick facts.
     4. **Compose Your Answer**:
     - Use the information from RAG and, if used, web searches and the user query to generate a final response.
-    - Use headings, bullet points, and examples to aid comprehension (not compulsory).
     - Avoid hallucinations: if uncertain, state that you don’t know or suggest the user check official sources.
     5. **Citing Sources**:
     - When using web search results, briefly mention the source (e.g., “According to [source]…”).
 
     Respond thoroughly, focusing on clarity and practical guidance for beginners."""
 )
-
+"""
 inputs = {"messages": [{"role": "user", "content": "is there any cap on the maximum number of foreign players I can have in my team just reply in a single or two lines"}]}
 result = Fantasy_FAQ_Agent.invoke(inputs)
 #for r in result['messages']:
 #    print(r)
 print(result["messages"][-1].content)
+"""

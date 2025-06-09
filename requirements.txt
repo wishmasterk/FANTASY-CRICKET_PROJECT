@@ -9,9 +9,3 @@ bs4
 faiss-cpu
 pypdf
 duckduckgo-search
-pycricbuzz
-requests_html
-lxml_html_clean
-cloudscraper
-undetected_chromedriver
-distutils

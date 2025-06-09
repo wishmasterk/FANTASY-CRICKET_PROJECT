@@ -3,7 +3,7 @@ from langgraph.prebuilt import create_react_agent
 from langchain_community.tools.tavily_search.tool import TavilySearchResults
 from langchain.tools import tool
 from dotenv import load_dotenv
-from typing import List, Dict, Optional, Union, Any
+from typing import List, Dict, Optional, Any
 from bs4 import BeautifulSoup
 from langchain_community.tools import DuckDuckGoSearchRun
 import difflib
@@ -14,8 +14,8 @@ import re
 load_dotenv()
 LLM = ChatOpenAI(model = "gpt-4.1")
 
-# search tools -> will be used to search the web at times
-tavily_search = TavilySearchResults() 
+
+tavily_search = TavilySearchResults(max_results = 5) 
 duck_search = DuckDuckGoSearchRun() 
 
 def fetch_response(url: str) -> dict:
@@ -498,7 +498,26 @@ def combine_recent_stats(player_name: str, player_role: str, overall_stats: dict
 def player_details(player_names: List[str]) -> List[dict]:
     """This tool returns the player ID and name for a list of player names.
         It takes a list containing names of players as input and output a list 
-        of dict with each dict containing the player id and name of that player."""
+        of dict with each dict containing the player id and name of that player.
+
+        Parameters:
+        player_names (List[str]):
+            A list of player names (strings) to look up.
+
+        Returns:
+        List[dict]:
+            A list of dictionaries, one per requested player. Each dictionary contains:
+                - name (str):     The official player name.
+                - role (str):     The player’s primary role (e.g., "batsman", "bowler", "allrounder", "wicketkeeper").
+                - is_wicketkeeper (str): "True" if the player is a wicketkeeper, else "False".
+                - is_overseas (str):     "True" if the player’s team is not India, else "False".
+                - batting_style (str):   The player’s batting style (e.g., "Right-hand bat").
+                - bowling_style (str):   The player’s bowling style (e.g., "Right-arm fast").
+            
+            If a lookup fails for any player, the dict will contain:
+                - "player name": `<requested name>`
+                - "error":       `<error description>`
+    """
     
     id_headers = {
         'x-apihub-key': '9HN92wz6l7bberNNuKkhDCXeb4YH4lXo2fIKuVdgCpB82jpHlM',
@@ -580,10 +599,11 @@ def player_stats(player_details: List[Dict[str, str]], venue_name: str) -> List[
             {
               "player name": <str>,
               "role": <str>,
-              "is_wicketkeeper": <bool>,
-              "is_overseas": <bool>,
+              "is_wicketkeeper": <str>,
+              "is_overseas": <str>,
               "batting_style": <str>,
               "bowling_style": <str>,
+              "opposition": <str>,
               "recent_stats": [
                 {
                   "title": "last_8_innings_stats",
@@ -688,112 +708,114 @@ def player_stats(player_details: List[Dict[str, str]], venue_name: str) -> List[
     # return combine_recent_stats(name, role, overall_stats_dict, opp_stats_dict, venue_stats_dict, opposition, venue_name, is_wk, is_overseas, batting_style, bowling_style)
 
 
-# 2. Data Collector Agent: 
 data_collector_agent = create_react_agent(
     model = LLM,
-    name = "data_miner",
-    tools = [player_stats,player_details,tavily_search, duck_search],
+    name = "data_collector_agent",
+    tools = [player_stats, player_details, tavily_search, duck_search],
     prompt = (
         """
-            You are **data_miner**, an intelligent agent designed to fetch T20 cricket stats from ESPNcricinfo.
+            - You are a data collector expert which fetches T20 stats for players. Your job is to fetch the T20 stats for player(s)
+            and return them to the user.
+            - You will receive a venue name and a list of dict where each dict contains the player name and opposition as input.
+            **Note - If the player(s)names or venue name or opposition name are incomplete and does only contain first word,
+            then use tavily_search or duck_search to get the complete name and pass that name in the dict.Just check the input you receive
+            and if you found some players with incomplete name or venue whose name is incomplete then do a web search and replace with the full name before calling any tool.
+            - You have acccess to two tools to fetch the stats, each of them fetches different stats. Moreover, you have also access to
+            tavily-search and duck_search tools to search the web in case if needed for something.
+            **TOOLS:
+            -> player_details: Given one or more player names, returns each player’s metadata in Dict format:
+            {
+                "name": {name}
+                "role": {role}
+                "is_wicketkeeper" (“True”/“False”): {is_wk}
+                "is_overseas" (“True”/“False”): {is_overseas}
+                "batting_style": {batting_style}
+                "bowling_style": {bowling_style}
+            }
+            - all the values are string type.
+            - So basically it inputs a list of names of the players and return a list of dict where each dict contains metadata specific to a player.
 
-            You have access to 2 tools:
-            1. `player_details`: Given one or more player names, returns each player’s metadata in JSON:
-            - `"role"`
-            - `"is_wicketkeeper"` (“True”/“False”)
-            - `"is_overseas"` (“True”/“False”)
-            - `"batting_style"`
-            - `"bowling_style"`
-            2. `player_stats`: Returns a player’s T20 stats given detailed input, including last 8 innings, performance vs opposition, and at a venue.
+            **IMPORTANT - Now you have to add a additional "opposition" key in the dict provided by this tool for all the players by yourself, it will be provided to you by the user,
+            so basically you will receive a, **list of dict where each dict will contain the player name and its opposition**, 
+            input_list = [
 
-            ---
+                {"player_name": "<PLAYER 1 NAME>", "opposition": "<OPPOSITION 1 NAME>"},
+                {"player_name": "<PLAYER 2 NAME>", "opposition": "<OPPOSITION 2 NAME>"},
+                ...
+                ] (this is the format of input which u will receive)
+            and you have use that information to add the "opposition" key to the output by the player_details tool.
+            - Now, you have to send the exact same modified list if dict as an input to the player_stats tool to fetch further career related stats.
 
-            ### TASK:
+            -> player_stats: This tool fetches player’s T20 stats - last 8 innings performance, performance vs a specific opposition, and perfomance at a speciifc venue.
+                Input to this tool will be the same modified list of dicta nd the name of the venue which is a string.
+                    [        
+                        {
+                        "name": 
+                        "role":
+                        "is_wicketkeeper"
+                        "is_overseas"
+                        "batting_style":
+                        "bowling_style": 
+                        "opposition":
+                        },
+                        {
 
-            When a user asks for cricket stats, follow these steps:
+                        ....
 
-            1. **Parse input.**
-            - The user will provide:
-                - One or more player names (plain text or structured list)
-                - An opposition team name
-                - A venue name
-            - Extract and normalize:
-                - `"players"`: list of player names
-                - `"opposition"`
-                - `"venue_name"`
-            - Normalize team/venue names to match ESPNcricinfo conventions (e.g., “RCB” → “Royal Challengers Bengaluru”).
+                        },
+                        {
 
-            2. **Fetch player metadata.**
-            - Call `player_details` with the `"players"` list.
-            - Expect a JSON array where each entry has:
-                ```json
-                {
-                "name": "...",
-                "role": "...",
-                "is_wicketkeeper": "True" or "False",
-                "is_overseas": "True" or "False",
-                "batting_style": "...",
-                "bowling_style": "..."
-                }
-                ```
-            - If any required field is missing for a player, return an error specifying which field and which player.
+                        ....
 
-            3. **Build the `player_details` payload for stats.**
-            - For each player in the metadata response, add `"opposition"` (from step 1).
-            - Assemble:
-                ```json
-                {
-                "player_details": [
+                        },......
+                    ], venue_name -> str
+
+            - This tool will add the stats to it and will return a list of dict where each dict contains information/stats for a particular player.
+            Returns:
+                List[Dict[str, Any]]: One summary dict per player in the format:
                     {
-                    "name": "...",
-                    "role": "...",
-                    "is_wicketkeeper": "...",
-                    "is_overseas": "...",
-                    "batting_style": "...",
-                    "bowling_style": "...",
-                    "opposition": "..."
-                    },
-                    ...
-                ],
-                "venue_name": "..."
-                }
-                ```
-
-            4. **Call `player_stats`.**
-            - Pass the JSON from step 3 exactly as input.
-            - **RULES:** 
-                - Do **NOT** edit or summarize the `player_stats` output. Return it exactly as received.
-                - If any player or venue normalization fails, return an error indicating what could not be resolved.
-                Return it in json format as given as output by the player_stats tool.
+                    "player name": <str>,
+                    "role": <str>,
+                    "is_wicketkeeper": <str>,
+                    "is_overseas": <str>,
+                    "batting_style": <str>,
+                    "bowling_style": <str>,
+                    "recent_stats": [
+                        {
+                        "title": "last_8_innings_stats",
+                        "data": { ... }
+                        },
+                        {
+                        "title": "career_stats_vs_<Opposition>",
+                        "data": { ... }
+                        },
+                        {
+                        "title": "career_stats_at_<Venue>",
+                        "data": { ... }
+                        }
+                    ]
+                    }
+            **Note - You have to output this exact same list to the user which oyu got from the "player_stats" tool without any modification to it.
+            - You also have the access of tavily_search and duck_search in case you need to do web search to get some data.
 
         """
     )
 )
 
-# print(player_stats.invoke({"player_details": [{"name": "Ravindra jadeja", "role": "bowlingallrounder", "is_wicketkeeper": "False", "is_overseas": "False", "batting_style": "Right-hand-Batsman", "bowling_style": "Right-arm-Medium", "opposition": "Mumbai indians"}], "venue_name": "chepauk"}))
-
-inputs = {"messages": [{"role": "user", "content": """
-    Match Venue - M Chinnaswamy Stadium, Bengaluru
-
-    Player 1: Virat Kohli
-    Name: Virat Kohli
-    Opposition: Punjab Kings
-                        
-    Player 2: Shreyas Iyer
-    Name: Shreyas Iyer
-    Opposition: Royal Challengers Bengaluru
-    
-    Player 3: Hardik Pandya
-    Name: Hardik Pandya
-    Opposition: RCB
-                        
-    Player 4: Jasprit Bumrah
-    Name: Jasprit Bumrah
-    Opposition: RCB
-        """}]}
+"""
+inputs = {"messages": [{"role": "user", "content":
+        
+        [
+            {"name": "Virat", "opposition": "Mumbai Indians"},
+            {"name": "Rohit Sharma", "opposition": "Royal Challengers Bengaluru"},
+            {"name": "Jasprit bumrah", "opposition": "Kolkata Knight Riders"},
+            {"name": "hardik pandya", "opposition": "Royal Challengers Bengaluru"}
+        ],
+        venue = Chinnaswamy Stadium, Bengaluru
+        
+            }]}
 result = data_collector_agent.invoke(inputs)
 for r in result['messages']:
-    print(r)
-print(result["messages"][-1].content)
+    r.pretty_print()
 
-# print(player_details.invoke({"player_names": ["Jasprit bumrah", "Virat Kohli"]}))
+"""
