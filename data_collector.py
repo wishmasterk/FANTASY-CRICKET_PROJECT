@@ -722,7 +722,7 @@ data_collector_agent = create_react_agent(
             and if you found some players with incomplete name or venue whose name is incomplete then do a web search and replace with the full name before calling any tool.
             - You have acccess to two tools to fetch the stats, each of them fetches different stats. Moreover, you have also access to
             tavily-search and duck_search tools to search the web in case if needed for something.
-            **TOOLS:
+            **Tools**:
             -> player_details: Given one or more player names, returns each player’s metadata in Dict format:
             {
                 "name": {name}
@@ -735,7 +735,7 @@ data_collector_agent = create_react_agent(
             - all the values are string type.
             - So basically it inputs a list of names of the players and return a list of dict where each dict contains metadata specific to a player.
 
-            **IMPORTANT - Now you have to add a additional "opposition" key in the dict provided by this tool for all the players by yourself, it will be provided to you by the user,
+            **IMPORTANT** - Now you have to add a additional "opposition" key in the dict provided by this tool for all the players by yourself, it will be provided to you by the user,
             so basically you will receive a, **list of dict where each dict will contain the player name and its opposition**, 
             input_list = [
 

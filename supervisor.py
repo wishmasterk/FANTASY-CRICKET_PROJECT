@@ -3,26 +3,13 @@ from langgraph_supervisor import create_supervisor
 from langgraph.prebuilt import create_react_agent
 from langchain_community.tools.tavily_search.tool import TavilySearchResults
 from langchain.tools import tool
-from collections import defaultdict
 from dotenv import load_dotenv
-from typing import List, Dict, Optional, Union, Any, Tuple
-from langchain_openai import OpenAIEmbeddings
-from langchain_community.document_loaders import PyPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import FAISS
-from bs4 import BeautifulSoup
 from langchain_community.tools import DuckDuckGoSearchRun
 from langgraph.checkpoint.memory import MemorySaver
-import difflib
-import time
-import requests
-import urllib.parse
-import re
-import os
-from researcher_agent import *
-#from SELECTOR import *
-#from Fantasy_FAQ_Agent import *
-from DATA_COLLECTOR import *
+from researcher import *
+from selector import *
+from fantasy_FAQ import *
+from data_collector import *
 
 memory = MemorySaver()
 LLM = ChatOpenAI(model = "gpt-4.1")

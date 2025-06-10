@@ -151,7 +151,7 @@ research_agent = create_react_agent(
     -You are a cricket research expert. 
     -Your job is to fetch out the details of the upcoming matches based on the user query.
     -You have access to a number of tools to carry out the research, and every tool does specific part of the work.
-    **TOOLS:
+    **Tools**:
     -> match_info: It will list down some of the upcoming matches in the recent time, and it will returns a dict containing
     some specific details about that match and that too for every match. Hence returns a list of dict.
     One of the key returned by this tool is "match_id" and it is a critical information as it will be used to get the information

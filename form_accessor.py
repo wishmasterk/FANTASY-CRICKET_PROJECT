@@ -5,7 +5,7 @@ from langchain_community.tools.tavily_search.tool import TavilySearchResults
 from langchain_community.tools import DuckDuckGoSearchRun
 from langchain.tools import tool
 from dotenv import load_dotenv
-from typing import Dict, Any, Union, List
+from typing import Dict, Any, Union, List, Tuple
 from bs4 import BeautifulSoup
 import requests
 import urllib.parse
@@ -242,7 +242,6 @@ def parse_table(table_html: str) -> Dict[str, str]:
     return stats
 
 
-@tool
 def players_faceoff(batsman: str, bowler: str) -> Dict[str, str]:
     """
     Compare a batsman and bowler head-to-head in T20I cricket and return aggregated career stats.
@@ -289,18 +288,18 @@ def players_faceoff(batsman: str, bowler: str) -> Dict[str, str]:
 
 def get_player_pace_spin_stats(player_name: str) -> Dict[str, Dict[str, Any]]:
     """
-    Fetches a batsman’s or bowler’s T20 career stats broken down by opponent bowling type (pace vs. spin),
+    Fetches a batsman’s T20 career stats broken down by opponent bowling type (pace vs. spin),
     using Scrape.do to retrieve the page. 
     - player_name: e.g. "sachin tendulkar"
-    - role: either "batsman" or "bowler"
+    - role: "batsman" or "batting allrounder", "bowling_allrounder"
     
     Returns a dict with two keys: "pace" and "spin", each mapping to an aggregated stats dict:
         {
             "pace": {
                 "Innings": int,
-                "Runs": int,       # for batters: runs scored; for bowlers: runs conceded
-                "Balls": int,      # balls faced (bat) or balls bowled (bowl)
-                "Outs": int,       # dismissals (bat) or wickets (bowl)
+                "Runs": int,       
+                "Balls": int,      
+                "Outs": int,       
                 "4s": int,
                 "6s": int,
                 "50s": int,
@@ -416,7 +415,19 @@ def get_player_pace_spin_stats(player_name: str) -> Dict[str, Dict[str, Any]]:
         "pace": finalize(pace_acc),
         "spin": finalize(spin_acc)
     }
+
+
 def compute_faceoff_score(faceoff: dict) -> float:
+    """
+    Compute a numeric "advantage" score from head-to-head stats.
+
+    Parameters:
+        faceoff (Dict[str, str]): Output of `players_faceoff` fucntion.
+        It is a dict containing the head-2-head stats.
+
+    Returns:
+        float: Positive favors batsman, negative favors bowler.
+    """
 
     # Convert all to numeric safely
     def to_float(val):
@@ -489,16 +500,33 @@ def compute_faceoff_score(faceoff: dict) -> float:
 
     return raw_score
 
+
 def compute_pitch_score(player: Dict[str, Any], pitch_cond: str):
-    """"""
+    """
+    Compute a pitch-condition-adjusted score for a player.
+    It is computed differently for batsman, allrounders and for bowlers.
+
+    Parameters:
+        player (Dict[str, Any]): Player stats dict with "bowler_type_stats" included.(entire dict)
+        pitch_cond (str): One of "seamer_friendly", "spin_friendly", "flat", "balanced" or None.
+
+    Returns:
+        float: Score between 0.0 and 1.0 indicating fit to pitch.
+    """
     def compute(stats: Dict[str, Any])  -> Tuple[float, float]:
-        """"""
+        """It computes the pitch score for batsman/allrounders on the basis of there performance against bowling_type.
+        Args:
+        Takes a dict as input containing the stats of that player against pace and against spin.
+        
+        Returns:
+        A tuple containing the pace_score and spin_score of that player."""
+
         pace = stats["pace"]
         spin = stats["spin"]
         pace_wkts_ratio = pace["Outs"] / (pace["Outs"] + spin["Outs"])
         spin_wkts_ratio = 1 - pace_wkts_ratio
 
-        avg_benchmark = 50.0 # basically we are seeing how ggod are the records of the batter against pace and spin
+        avg_benchmark = 50.0 # basically we are seeing how good are the records of the batter against pace and spin
         sr_benchmark = 200.0
 
         weight = {
@@ -529,17 +557,20 @@ def compute_pitch_score(player: Dict[str, Any], pitch_cond: str):
 
         return pace_score, spin_score
 
-
+    if not pitch_cond: # case in which pitch_cond is not fetched
+        return 0.0
+    
     role = player["role"].lower()
+    bowling_style = player["bowling_style"].lower()
     if "bowler" in role:
         if pitch_cond == "seamer_friendly":
-            if "fast" in role or "medium" in role:
+            if "fast" in bowling_style or "medium" in bowling_style:
                 return 0.7 # since cond is favourable for pace, hence more score to the pacers
             else:
                 return 0.3 # low score to the spinners
 
         elif pitch_cond == "spin_friendly":
-            if "fast" in role or "medium" in role:
+            if "fast" in bowling_style or "medium" in bowling_style:
                 return 0.3 # since cond is favourable for spin, hence low score to the pacers
             else:
                 return 0.7 # high score to the spinners
@@ -565,7 +596,157 @@ def compute_pitch_score(player: Dict[str, Any], pitch_cond: str):
     
 @ tool
 def head_2_head(team_A : List[Dict[str, Any]], team_B : List[Dict[str, Any]], pitch_cond: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """edf"""
+    """ It appends the head_2_head stats between players of two teams, append the bowling type stats for players, append the head_2_head score
+    and pitch_score for all players to the original list of dicts for both the teams.
+    Parameters:
+    team_A (List[Dict[str, Any]]):
+        List of player dicts for Team A. Each dict has a structure:
+        {
+            "name": <str>,
+            "role": <str>,              
+            "is_wk": <str>          
+            "is_overseas": <str>    
+            "batting_style": <str>    
+            "bowling_style": <str>     
+            "recent_stats": [
+                {
+                    "title": "last_8_innings_stats",
+                    "data": {
+                        "Batting": {
+                        .....
+                        },
+                        "Bowling": { # in case when player is a allrounder
+                        .....
+                        }
+                    }
+                },
+                {
+                    "title": "career_stats_vs_<opposition>",
+                    "data": {
+                        "Batting":{
+                        .....
+                        },
+                        "Bowling": {
+                        .....
+                        }
+                    }
+                },
+                {
+                    "title": "career_stats_at_<venue>",
+                    "data": {
+                        "Batting":{
+                        .....
+                        },
+                        "Bowling": {
+                        .....
+                        }
+                    }
+                }
+            ]
+        }
+
+    team_B (List[Dict[str, Any]]):
+        Same structure as team_A for Team B.
+    pitch_cond (str):
+        One of "seamer_friendly", "spin_friendly", "flat", "balanced" or "None".
+    
+    Returns: 
+    Updated list of dict containing the stats of the players for both team -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]],
+    separate list for separate team:
+    [
+        {
+            "name": <str>,
+            "role": <str>,              
+            "is_wk": <str>          
+            "is_overseas": <str>    
+            "batting_style": <str>    
+            "bowling_style": <str>     
+            "recent_stats": [
+                {
+                    "title": "last_8_innings_stats",
+                    "data": {
+                        "Batting": {
+                        .....
+                        },
+                        "Bowling": { # in case when player is a allrounder
+                        .....
+                        }
+                    }
+                },
+                {
+                    "title": "career_stats_vs_<opposition>",
+                    "data": {
+                        "Batting":{
+                        .....
+                        },
+                        "Bowling": {
+                        .....
+                        }
+                    }
+                },
+                {
+                    "title": "career_stats_at_<venue>",
+                    "data": {
+                        "Batting":{
+                        .....
+                        },
+                        "Bowling": {
+                        .....
+                        }
+                    }
+                }
+            ], 
+            # — Head-to-head breakdowns
+            "head_2_head_stats": [  # one per opponent encountered
+                {
+                    "opponent":       "<str: opponent name>",
+                    "opp_role":       "<str: 'bowler' or 'batsman'>",
+                    "stats": {        # raw output from players_faceoff
+                        "Title": "<str: e.g. 'Virat Kohli V/S Jasprit Bumrah'>",
+                        "Stats": {
+                            "Innings": "<str>",
+                            "Runs":    "<str>",
+                            "Balls":   "<str>",
+                            "Outs":    "<str>",
+                            "Dots":    "<str>",
+                            "4s":      "<str>",
+                            "6s":      "<str>",
+                            "SR":      "<str>",
+                            "Avg":     "<str>",
+                        },
+                    },
+                    "advantage_score": <float>,
+                },
+                # … additional opponents dict …
+            ],
+
+            # — Aggregated career split by bowling type
+            "bowler_type_stats": {
+                "pace": {
+                    "Runs":  <int>,
+                    "Balls": <int>,
+                    "Outs":  <int>,
+                    "4s":    <int>,
+                    "6s":    <int>,
+                    "50s":   <int>,
+                    "100s":  <int>,
+                    "SR":    <float>,
+                    "Avg":   <float>,
+                },
+                "spin": {
+                    # same fields as above
+                }
+            },
+
+            # — Summary scores
+            "head_2_head_score": <float>,
+            "pitch_score":       <float>, 
+        },
+        {
+        ..... # separate dict for each player have the similar kind of structure
+        },
+    ] 
+        """
 
     def categorize_players(players: List[Dict[str, Any]]):
         """
@@ -710,3 +891,91 @@ def head_2_head(team_A : List[Dict[str, Any]], team_B : List[Dict[str, Any]], pi
         player["pitch_score"]  = compute_pitch_score(player, pitch_cond)
 
     return team_A, team_B
+
+form_accessor_agent = create_react_agent(
+    model = LLM,
+    tools = [head_2_head, tavily_search, duck_search],
+    name = "form_accessor_agent",
+    prompt = """
+    You are the Form Accessor Agent, responsible for comprehensive head-to-head and form analysis of two teams.
+
+    **Inputs**  
+    - A list of two rosters (team_A and team_B), each a list of player dicts with keys:  
+    `"name"`, `"role"`, `"is_wk"`, `"is_overseas"`, `"batting_style"`, `"bowling_style"`, and `"recent_stats"`.  
+    - A raw pitch description string (e.g. “spin can play a role in today's match”).
+
+    **Tools**  
+    1. `tavily_search(query: str) → List[SearchResult]`  
+    2. `duck_search(query: str) → List[SearchResult]`  
+    3. `head_2_head(team_A: List[Dict], team_B: List[Dict], pitch_cond: str) → Tuple[List[Dict], List[Dict]]`  
+    - Computes for every player:  
+        • `head_2_head_stats` vs opponents (batsman vs bowler)  
+        • `bowler_type_stats` (career splits vs pace/spin)  
+        • `head_2_head_score` (avg advantage float)  
+        • `pitch_score (fit‐to‐pitch metric)
+
+    **How to Respond**  
+    1. **Normalize** the raw pitch description into one of:  
+    "seamer_friendly", "spin_friendly", "flat", or "balanced".
+    - If no information is available about the pitch then make it None. 
+    2. **Call** the `head_2_head` tool with your two team lists and the canonical `pitch_cond` string:  
+    ```json
+    {
+        "tool": "head_2_head",
+        "args": {
+        "team_A": <team_A list>,
+        "team_B": <team_B list>,
+        "pitch_cond": "<seamer_friendly|spin_friendly|flat|balanced|None>"
+        }
+    } 
+    **Note - You have to output the teams in the same format as returned by the head_2_head_tool, do not make any changes to it,
+    strictly adhered to it.
+    """
+)
+
+result = form_accessor_agent.invoke({"messages": [{"role": "user", "content": 
+    """
+    Team_A = 
+    [
+        {
+        'name': 'Virat Kohli',
+        'role': 'batsman',
+        'is_wk': 'False',
+        'is_overseas': 'False',
+        'batting_style': 'Right Handed Bat',
+        'bowling_style': 'Right-arm medium',
+        'recent_stats': [{'title': 'last_8_innings_stats', 'data': {'Batting': {'Matches': 8, 'Innings': 8, 'Runs': 408, 'Balls': 278, 'Outs': 7, '4s': 46, '6s': 9, '50s': 5, '100s': 0, 'SR': 146.76, 'Avg': 58.29}}}, {'title': 'career_stats_vs_Punjab_Kings', 'data': {'Batting': {'Matches': 36, 'Innings': 36, 'Runs': 1159, 'Balls': 874, 'Outs': 32, '4s': 120, '6s': 33, '50s': 6, '100s': 1, 'SR': 132.6, 'Avg': 36.21}}}, {'title': 'career_stats_at_M_Chinnaswamy_Stadium', 'data': {'Batting': {'Matches': 109, 'Innings': 106, 'Runs': 3618, 'Balls': 2514, 'Outs': 92, '4s': 329, '6s': 154, '50s': 27, '100s': 4, 'SR': 143.91, 'Avg': 39.32}}},
+        {
+        'name': 'Hardik Pandya',
+        'role': 'batting allrounder',
+        'is_wk': 'False', 
+        'is_overseas': 'False', 
+        'batting_style': 'Right Handed Bat', 
+        'bowling_style': 'Right-arm fast-medium', 
+        'recent_stats': [{'title': 'last_8_innings_stats', 'data': {'Batting': {'Matches': 8, 'Innings': 7, 'Runs': 120, 'Balls': 76, 'Outs': 5, '4s': 9, '6s': 6, '50s': 0, '100s': 0, 'SR': 157.89, 'Avg': 24.0}, 'Bowling': {'Matches': 8, 'Innings': 7, 'Overs': 13.0, 'Maidens': 0, 'Runs': 146, 'Wkts': 3, 'Eco': 11.23, 'Avg': 48.67, 'SR': 26.0}}}, {'title': 'career_stats_vs_Royal_Challengers_Bengaluru', 'data': {'Batting': {'Matches': 18, 'Innings': 17, 'Runs': 361, 'Balls': 220, 'Outs': 8, '4s': 22, '6s': 26, '50s': 2, '100s': 0, 'SR': 164.09, 'Avg': 45.12}, 'Bowling': {'Matches': 18, 'innings': 12, 'Overs': 29.0, 'Maidens': 0, 'Runs': 303, 'Wkts': 7, 'Eco': 10.44, 'Avg': 43.28, 'SR': 24.86}}}, {'title': 'career_stats_at_M_Chinnaswamy_Stadium', 'data': {'Batting': {'Matches': 12, 'Innings': 9, 'Runs': 162, 'Balls': 112, 'Outs': 6, '4s': 12, '6s': 9, '50s': 1, '100s': 0, 'SR': 144.64, 'Avg': 27.0}, 'Bowling': {'Matches': 12, 'innings': 10, 'Overs': 27.0, 'Maidens': 0, 'Runs': 240, 'Wkts': 11, 'Eco': 8.88, 'Avg': 21.81, 'SR': 14.73}}}    
+    ],
+    Team_B = 
+    [
+    {
+    'name': 'Jasprit Bumrah', 
+    'role': 'bowler', 
+    'is_wk': 'False', 
+    'is_overseas': 'False', 
+    'batting_style': 'Right Handed Bat', 
+    'bowling_style': 'Right-arm fast', 
+    'recent_stats': [{'title': 'last_8_innings_stats', 'data': {'Bowling': {'Matches': 8, 'Innings': 8, 'Overs': 31.2, 'Maidens': 0, 'Runs': 197, 'Wkts': 14, 'Eco': 6.31, 'Avg': 14.07, 'SR': 13.43}}}, {'title': 'career_stats_vs_Royal_Challengers_Bengaluru', 'data': {'Bowling': {'Matches': 20, 'innings': 20, 'Overs': 78.0, 'Maidens': 2, 'Runs': 581, 'Wkts': 29, 'Eco': 7.44, 'Avg': 20.03, 'SR': 16.14}}}, {'title': 'career_stats_at_M_Chinnaswamy_Stadium', 'data': {'Bowling': {'Matches': 10, 'innings': 10, 'Overs': 78.0, 'Maidens': 2, 'Runs': 581, 'Wkts': 29, 'Eco': 7.44, 'Avg': 20.03, 'SR': 16.14}}},
+    {
+    'name': 'Shreyas Iyer', 
+    'role': 'batsman', 
+    'is_wk': 'False', 
+    'is_overseas': 'False', 
+    'batting_style': 'Right Handed Bat', 
+    'bowling_style': 'Right-arm legbreak', 
+    'recent_stats': [{'title': 'last_8_innings_stats', 'data': {'Batting': {'Matches': 8, 'Innings': 8, 'Runs': 316, 'Balls': 187, 'Outs': 6, '4s': 25, '6s': 18, '50s': 3, '100s': 0, 'SR': 168.98, 'Avg': 52.67}}}, {'title': 'career_stats_vs_Royal_Challengers_Bengaluru', 'data': {'Batting': {'Matches': 18, 'Innings': 18, 'Runs': 409, 'Balls': 341, 'Outs': 17, '4s': 34, '6s': 13, '50s': 4, '100s': 0, 'SR': 119.94, 'Avg': 24.05}}}, {'title': 'career_stats_at_M_Chinnaswamy_Stadium', 'data': {'Batting': {'Matches': 11, 'Innings': 11, 'Runs': 305, 'Balls': 222, 'Outs': 9, '4s': 26, '6s': 14, '50s': 3, '100s': 0, 'SR': 137.38, 'Avg': 33.88}}}
+    ],
+    "The pitch will be quite slow, hence it can benefit the spinners.
+
+    """
+    }]})
+for message in result["messages"]:
+    message.pretty_print()
