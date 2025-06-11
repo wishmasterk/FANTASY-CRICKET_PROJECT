@@ -234,8 +234,9 @@ player_selector_agent = create_react_agent(
   """
 )
 
+"""
 result = player_selector_agent.invoke({"messages": [{"role": "user", "content":
-      """
+      
   [
     {
         "name": "Virat Kohli",
@@ -353,7 +354,8 @@ result = player_selector_agent.invoke({"messages": [{"role": "user", "content":
         "pitch_score": 0.6469136020408163
     }
   ] 
-      """
+      
       }]})
 for message in result["messages"]:
     message.pretty_print()
+    """

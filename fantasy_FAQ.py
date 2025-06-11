@@ -110,9 +110,9 @@ def fantasy_guide_RAG(query: str) -> Dict[str, Union[str, List[str]]]:
         "retrieved_text": retrieved_texts
     }
 
-Fantasy_FAQ_Agent = create_react_agent(
+FAQ_agent = create_react_agent(
     model = LLM,
-    name = "fantasy_expert",
+    name = "FAQ_agent",
     tools = [tavily_search, duck_search, fantasy_guide_RAG],
     prompt = """
     - You are Fantasy Expert, an AI assistant specialized in fantasy cricket. 
