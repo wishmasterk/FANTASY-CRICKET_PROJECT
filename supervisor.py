@@ -35,7 +35,6 @@ supervisor_agent = create_supervisor(
     "call math_agent for any calculation required by the user")
 )
 
-
 agent = supervisor_agent.compile(checkpointer = memory)
 while True:
   inp = input("Enter: ")
